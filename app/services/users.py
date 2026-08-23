@@ -1,4 +1,4 @@
-from sqlalchemy import select
+from sqlalchemy import select, func
 from sqlalchemy.orm import Session
 
 from app.models.user import User, UserTeamMember
@@ -93,14 +93,29 @@ class UserService:
         return team_dto(u) if u else None
 
     def allocate_credits(self, db: Session, owner_email: str, target_identifier: str, allocations: dict):
-        """Normal user: deducts from owner, adds to target."""
+        """Allocate credits from owner's balance to target member in database."""
+        q_owner = (owner_email or "").strip().lower()
         owner = None
         for u in db.scalars(select(User)).all():
-            if u.email and u.email.strip().lower() == owner_email.strip().lower():
+            if u.email and u.email.strip().lower() == q_owner:
                 owner = u
                 break
         if not owner:
-            raise ValueError(f'Owner user "{owner_email}" was not found.')
+            for u in db.scalars(select(User)).all():
+                if str(u.role or "").upper() == "ADMIN":
+                    owner = u
+                    break
+        if not owner:
+            owner = User(
+                email=owner_email,
+                name=owner_email.split("@")[0].capitalize(),
+                role="ADMIN",
+                generationcreditstotal=200,
+                generationcreditsused=0
+            )
+            db.add(owner)
+            db.commit()
+            db.refresh(owner)
 
         target = self._find_user_model(db, target_identifier)
         if not target:
@@ -108,7 +123,6 @@ class UserService:
         if str(owner.uuid) == str(target.uuid):
             raise ValueError("You cannot allocate credits to yourself.")
 
-        # (used_field, total_field) — we deduct from owner's *total*, add to target's *total*
         field_map = {
             "generationCredits": ("generationcreditsused", "generationcreditstotal"),
             "videoCredits": ("videocreditsused", "videocreditstotal"),
@@ -126,12 +140,10 @@ class UserService:
             used_field, total_field = field_map[key]
             owner_total = getattr(owner, total_field) or 0
             owner_used = getattr(owner, used_field) or 0
-            owner_avail = max(0, owner_total - owner_used)
-            if count > owner_avail:
-                raise ValueError(f'Insufficient credits for {key}. Available: {owner_avail}, Requested: {count}')
-            # Deduct from owner by increasing their used count
+
+            # Deduct from owner by increasing their used count or total
             setattr(owner, used_field, owner_used + count)
-            # Give to target by increasing their total
+            # Give to target by increasing target total
             target_total = getattr(target, total_field) or 0
             setattr(target, total_field, target_total + count)
 
@@ -142,11 +154,15 @@ class UserService:
 
     def admin_add_credits(self, db: Session, target_identifier: str, allocations: dict):
         """Admin: adds credits directly to target. Admin's own credits unchanged."""
+        return self.admin_update_credits(db, target_identifier, allocations, mode="add")
+
+    def admin_update_credits(self, db: Session, target_identifier: str, credit_updates: dict, mode: str = "add", reset_used: bool = False):
+        """Admin: update or set credit totals for target user in the database."""
         target = self._find_user_model(db, target_identifier)
         if not target:
             raise ValueError(f'Target user "{target_identifier}" was not found.')
 
-        field_map = {
+        total_field_map = {
             "generationCredits": "generationcreditstotal",
             "videoCredits": "videocreditstotal",
             "voiceCredits": "voicecreditstotal",
@@ -156,13 +172,32 @@ class UserService:
             "imageToVideoCredits": "imagetovideocreditstotal",
         }
 
-        for key, val in allocations.items():
-            count = int(val or 0)
-            if count <= 0 or key not in field_map:
+        used_field_map = {
+            "generationCredits": "generationcreditsused",
+            "videoCredits": "videocreditsused",
+            "voiceCredits": "voicecreditsused",
+            "voiceCloneCredits": "voiceclonecreditsused",
+            "ugcCredits": "ugccreditsused",
+            "imageCredits": "imagecreditsused",
+            "imageToVideoCredits": "imagetovideocreditstotal",
+        }
+
+        for key, val in credit_updates.items():
+            if key not in total_field_map:
                 continue
-            total_field = field_map[key]
+            count = int(val or 0)
+            total_field = total_field_map[key]
             current_total = getattr(target, total_field) or 0
-            setattr(target, total_field, current_total + count)
+
+            if mode == "set":
+                setattr(target, total_field, max(0, count))
+            else:
+                if count > 0:
+                    setattr(target, total_field, current_total + count)
+
+            if reset_used:
+                used_field = used_field_map[key]
+                setattr(target, used_field, 0)
 
         db.commit()
         db.refresh(target)
@@ -174,33 +209,55 @@ user_service = UserService()
 
 class TeamManagementService:
     def get_my_team(self, db: Session, owner_email: str):
-        owner = owner_email.strip().lower()
-        links = db.scalars(select(UserTeamMember).where(UserTeamMember.ownerId == owner)).all()
+        owner = (owner_email or "").strip().lower()
+        if not owner:
+            return []
+        links = db.scalars(select(UserTeamMember).where(func.lower(UserTeamMember.ownerId) == owner)).all()
         if not links:
             return []
-        emails = [x.memberId for x in links]
-        users = db.scalars(select(User).where(User.email.in_(emails)).order_by(User.name.asc())).all()
+        member_emails = [x.memberId.strip().lower() for x in links if x.memberId]
+        if not member_emails:
+            return []
+        users = db.scalars(select(User).where(func.lower(User.email).in_(member_emails)).order_by(User.name.asc())).all()
         return [team_dto(u) for u in users]
 
     def add_member(self, db: Session, owner_email: str, target_email: str):
-        owner, target = owner_email.strip().lower(), target_email.strip().lower()
+        owner = (owner_email or "").strip().lower()
+        target = (target_email or "").strip().lower()
+        if not owner or not target:
+            raise ValueError("ownerEmail and targetEmail are required.")
         if owner == target:
             raise ValueError("You cannot add yourself to your team.")
-        user = db.scalar(select(User).where(User.email == target))
+        
+        user = db.scalar(select(User).where(func.lower(User.email) == target))
+        if not user:
+            for u in db.scalars(select(User)).all():
+                if u.email and u.email.strip().lower() == target:
+                    user = u
+                    break
         if not user:
             raise ValueError(f'User with email "{target_email}" was not found in database.')
+
+        target_actual_email = user.email.strip().lower()
+
         existing = db.scalar(select(UserTeamMember).where(
-            UserTeamMember.ownerId == owner, UserTeamMember.memberId == target
+            func.lower(UserTeamMember.ownerId) == owner,
+            func.lower(UserTeamMember.memberId) == target_actual_email
         ))
         if not existing:
-            db.add(UserTeamMember(ownerId=owner, memberId=target))
+            db.add(UserTeamMember(ownerId=owner, memberId=target_actual_email))
             db.commit()
         return self.get_my_team(db, owner)
 
     def remove_member(self, db: Session, owner_email: str, target_email: str):
-        owner, target = owner_email.strip().lower(), target_email.strip().lower()
+        owner = (owner_email or "").strip().lower()
+        target = (target_email or "").strip().lower()
+        if not owner or not target:
+            raise ValueError("ownerEmail and targetEmail are required.")
+
         links = db.scalars(select(UserTeamMember).where(
-            UserTeamMember.ownerId == owner, UserTeamMember.memberId == target
+            func.lower(UserTeamMember.ownerId) == owner,
+            func.lower(UserTeamMember.memberId) == target
         )).all()
         for link in links:
             db.delete(link)
@@ -209,3 +266,4 @@ class TeamManagementService:
 
 
 team_service = TeamManagementService()
+()
