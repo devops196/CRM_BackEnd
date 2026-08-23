@@ -1,0 +1,4 @@
+"id","generationcreditsused","generationcreditstotal","videocreditsused","videocreditstotal","voicecreditsused","voiceclonecreditsused","voicecreditstotal","voiceclonecreditstotal","analysiscreditsunlimited","ugccreditsused","ugccreditstotal","imagecreditsused","imagecreditstotal","imagetovideocreditsused","imagetovideocreditstotal","name","email","profilepicture"
+1,25,100,10,50,5,2,25,10,true,20,100,15,50,5,25,Dhanush,dhanush@quickads.ai,https://example.com/dhanush.jpg
+2,60,100,35,50,18,7,25,10,false,70,100,40,50,18,25,Admin,crm_admin@quickads.ai,https://example.com/rahul.jpg
+3,10,100,5,50,3,1,25,10,true,15,100,8,50,3,25,tester_1,tester_1@quickads.ai,https://example.com/priya.jpg
