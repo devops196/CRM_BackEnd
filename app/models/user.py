@@ -1,9 +1,10 @@
 from datetime import datetime
 from enum import Enum
 from typing import Optional
+import uuid
 from uuid import uuid4
 
-from sqlalchemy import DateTime, Integer, String, Boolean, Text, UniqueConstraint, func
+from sqlalchemy import Column, DateTime, Integer, String, Boolean, Text, UniqueConstraint, ForeignKey, func
 from sqlalchemy.orm import Mapped, mapped_column
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 
@@ -26,7 +27,7 @@ class User(Base):
 
     uuid: Mapped[str] = mapped_column(PG_UUID(as_uuid=False), primary_key=True, default=lambda: str(uuid4()))
     name: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
-    email: Mapped[Optional[str]] = mapped_column(String(255), nullable=True, index=True)
+    email: Mapped[Optional[str]] = mapped_column(String(255), nullable=True, index=True, unique=True)
     profilepicture: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     role: Mapped[str] = mapped_column(String(20), default="user", nullable=False)
 
@@ -45,6 +46,7 @@ class User(Base):
     imagecreditstotal: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     imagetovideocreditsused: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     imagetovideocreditstotal: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    subscription_plan: Mapped[Optional[str]] = mapped_column(String(100), default="discover", nullable=True)
 
     @property
     def id(self) -> str:
@@ -126,3 +128,26 @@ class UserTeamMember(Base):
     ownerId: Mapped[str] = mapped_column(String, nullable=False)
     memberId: Mapped[str] = mapped_column(String, nullable=False)
     createdAt: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=True)
+
+
+class Subscription(Base):
+    __tablename__ = "subscriptions"
+
+    id = Column(PG_UUID(as_uuid=False), primary_key=True, default=lambda: str(uuid4()))
+    customer_email = Column(String(255), ForeignKey("User_details.email", ondelete="CASCADE"), nullable=False)
+    plan_name = Column(String(100), nullable=False)
+    status = Column(String(50), default="active")
+    start_date = Column(DateTime(timezone=True))
+    end_date = Column(DateTime(timezone=True))
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
+class UserDomainAssociation(Base):
+    __tablename__ = "user_domain_association"
+
+    association_id = Column(PG_UUID(as_uuid=False), primary_key=True, default=lambda: str(uuid4()))
+    user_id = Column(PG_UUID(as_uuid=False), ForeignKey("User_details.uuid", ondelete="CASCADE"), nullable=False)
+    domain_name = Column(String(255))
+    role = Column(String(50))
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
