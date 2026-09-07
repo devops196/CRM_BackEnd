@@ -193,11 +193,21 @@ def get_user_multi_table_context(
 
 def _do_update_subscription(db: Session, email_raw: str, plan_key: str):
     """Shared logic: update subscription plan and credit limits for a user."""
-    if plan_key not in PLAN_CREDIT_LIMITS:
+    norm_key = plan_key.strip().lower()
+    if norm_key not in PLAN_CREDIT_LIMITS:
+        alt1 = norm_key.replace(" ", "_")
+        alt2 = norm_key.replace("_", " ")
+        if alt1 in PLAN_CREDIT_LIMITS:
+            norm_key = alt1
+        elif alt2 in PLAN_CREDIT_LIMITS:
+            norm_key = alt2
+
+    if norm_key not in PLAN_CREDIT_LIMITS:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Invalid plan name '{plan_key}'.",
         )
+    plan_key = norm_key
 
     clean_email = email_raw.lower().strip()
 
