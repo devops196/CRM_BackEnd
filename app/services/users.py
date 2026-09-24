@@ -244,7 +244,7 @@ class UserService:
             "voiceCloneCredits": "voiceclonecreditsused",
             "ugcCredits": "ugccreditsused",
             "imageCredits": "imagecreditsused",
-            "imageToVideoCredits": "imagetovideocreditstotal",
+            "imageToVideoCredits": "imagetovideocreditsused",
         }
 
         for key, val in credit_updates.items():

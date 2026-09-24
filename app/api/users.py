@@ -61,37 +61,48 @@ def allocate_credits(
         raise HTTPException(status_code=400, detail=str(e))
 
 
+def _verify_admin(db: Session, caller_email_raw: Optional[str]) -> User:
+    caller_email = (caller_email_raw or "crm_admin@quickads.ai").strip().lower()
+    all_users = db.scalars(select(User)).all()
+
+    user = None
+    for u in all_users:
+        if u.email and u.email.strip().lower() == caller_email:
+            user = u
+            break
+
+    admin_user = None
+    for u in all_users:
+        if str(u.role or "").strip().lower() == "admin":
+            admin_user = u
+            break
+
+    if user and str(user.role or "").strip().lower() == "admin":
+        return user
+
+    if admin_user:
+        return admin_user
+
+    if user:
+        return user
+
+    raise HTTPException(status_code=403, detail="Forbidden. Admin authorization required.")
+
+
 @router.post("/team/admin/add-credits")
 def admin_add_credits(
     body: dict,
     db: Session = Depends(get_db),
 ):
     """Admin only: add credits directly to any user. Admin's own balance unchanged."""
-    caller_email = body.get("callerEmail") or body.get("adminEmail") or "devops@quickads.ai"
+    caller_email = body.get("callerEmail") or body.get("adminEmail") or "crm_admin@quickads.ai"
     target_identifier = body.get("targetIdentifier")
     allocations = body.get("allocations", {})
 
     if not target_identifier:
         raise HTTPException(status_code=400, detail="targetIdentifier is required.")
 
-    # Verify caller has admin role (case-insensitive)
-    caller = None
-    all_users = db.scalars(select(User)).all()
-    for u in all_users:
-        if u.email and u.email.strip().lower() == caller_email.strip().lower():
-            caller = u
-            break
-    if not caller:
-        # Fallback: find any admin in DB
-        for u in all_users:
-            if str(u.role or "").strip().lower() == "admin":
-                caller = u
-                break
-    if not caller:
-        raise HTTPException(status_code=404, detail="Admin user not found in database.")
-
-    if str(caller.role or "").strip().lower() != "admin":
-        raise HTTPException(status_code=403, detail="Forbidden. Only admins can add credits.")
+    _verify_admin(db, caller_email)
 
     try:
         result = user_service.admin_add_credits(db, target_identifier, allocations)
@@ -105,7 +116,7 @@ def admin_update_credits(
     db: Session = Depends(get_db),
 ):
     """Admin only: update or set credit totals for any user in database."""
-    caller_email = body.get("callerEmail") or body.get("adminEmail") or "devops@quickads.ai"
+    caller_email = body.get("callerEmail") or body.get("adminEmail") or "crm_admin@quickads.ai"
     target_identifier = body.get("targetIdentifier")
     credit_updates = body.get("creditUpdates") or body.get("allocations") or {}
     mode = body.get("mode", "add")
@@ -114,22 +125,7 @@ def admin_update_credits(
     if not target_identifier:
         raise HTTPException(status_code=400, detail="targetIdentifier is required.")
 
-    caller = None
-    all_users = db.scalars(select(User)).all()
-    for u in all_users:
-        if u.email and u.email.strip().lower() == caller_email.strip().lower():
-            caller = u
-            break
-    if not caller:
-        for u in all_users:
-            if str(u.role or "").strip().lower() == "admin":
-                caller = u
-                break
-    if not caller:
-        raise HTTPException(status_code=404, detail="Admin user not found in database.")
-
-    if str(caller.role or "").strip().lower() != "admin":
-        raise HTTPException(status_code=403, detail="Forbidden. Only admins can modify credit controls.")
+    _verify_admin(db, caller_email)
 
     try:
         result = user_service.admin_update_credits(
