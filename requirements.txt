@@ -1,12 +1,42 @@
+# CRM FastAPI Backend — Production Dependencies
+# Python 3.12 (matches Render's default runtime)
+#
+# To regenerate with exact pinned versions from your venv:
+#   pip freeze > requirements.txt
+# Then remove dev-only packages (pytest, black, etc.).
+
+# Web framework
 fastapi==0.116.1
+
+# Production ASGI server (no --reload in production)
 uvicorn[standard]==0.35.0
+
+# Database ORM + migrations
 sqlalchemy==2.0.43
 alembic==1.16.4
+
+# PostgreSQL driver (psycopg v3 — NOT psycopg2)
+# Use [binary] so pip downloads a prebuilt wheel instead of compiling from C source
 psycopg[binary]==3.2.9
+
+# Data validation & settings from env vars
 pydantic==2.11.7
 pydantic-settings==2.10.1
+
+# JWT auth
 PyJWT==2.10.1
+
+# Google OAuth token verification
 google-auth==2.40.3
+
+# Load .env files in development (safe to include in prod — no-ops if .env absent)
 python-dotenv==1.1.1
+
+# Required for Python 3.9 compatibility with Pydantic v2 type annotations
 eval-type-backport==0.4.0
+
+# HTTP client — used by google-auth for token verification
 requests==2.32.5
+
+# Required by FastAPI for parsing multipart form data and file uploads
+python-multipart==0.0.20

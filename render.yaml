@@ -1,21 +1,64 @@
+# Render Blueprint — CRM FastAPI Backend
+# Docs: https://render.com/docs/blueprint-spec
+#
+# IMPORTANT: Do NOT set DATABASE_URL here with a real password.
+# Add it in the Render dashboard under Environment > Environment Variables,
+# or link it from your Render Postgres database using the "Add from database" button.
+#
+# After pushing this file to GitHub, go to https://dashboard.render.com
+# → New → Blueprint → select your repo → Render reads this file automatically.
+
 services:
   - type: web
     name: crm-fastapi-backend
-    runtime: docker
+    runtime: python             # native Python runtime — faster than Docker on Render free tier
     plan: free
+    region: oregon
+    branch: main
+
+    # Build: install dependencies from requirements.txt
+    buildCommand: pip install -r requirements.txt
+
+    # Start: run migrations then launch the app.
+    # Render injects $PORT automatically — uvicorn must bind to it.
+    # --workers 1 is correct for Render free tier (single CPU).
+    # Do NOT use --reload in production.
+    startCommand: alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port $PORT --workers 1
+
     healthCheckPath: /api/v1/health/
+
     envVars:
-      - key: PORT
-        value: 8000
       - key: NODE_ENV
         value: production
+
+      - key: PORT
+        value: 10000            # Render free tier default; overridden by Render at runtime
+
+      # Set FRONTEND_URL to your actual Vercel deployment URL in the Render dashboard.
+      # Example: https://your-crm.vercel.app
       - key: FRONTEND_URL
-        sync: false
+        sync: false             # sync: false = must be set manually in dashboard
+
+      # Generate a strong random secret: python -c "import secrets; print(secrets.token_hex(32))"
       - key: JWT_SECRET
         sync: false
+
+      - key: JWT_EXPIRES_IN
+        value: 7d
+
+      - key: COOKIE_NAME
+        value: access_token
+
+      # Link this to your Render Postgres database via the dashboard.
+      # Use the Internal Database URL (not External) for best performance.
+      # Format: postgresql+psycopg://user:pass@host/dbname
+      # DO NOT hardcode real credentials here — this file is committed to Git.
       - key: DATABASE_URL
         sync: false
+
+      # From Google Cloud Console → APIs & Services → Credentials → OAuth 2.0 Client
       - key: GOOGLE_CLIENT_ID
         sync: false
+
       - key: GOOGLE_CLIENT_SECRET
         sync: false

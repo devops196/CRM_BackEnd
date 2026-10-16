@@ -451,4 +451,3 @@ class TeamManagementService:
 
 
 team_service = TeamManagementService()
-()
