@@ -9,7 +9,25 @@ from app.config import settings
 # psycopg v3 needs sslmode passed via connect_args rather than a URL param.
 # When running locally (localhost / 127.0.0.1) we skip SSL so the dev
 # experience stays smooth with a plain Docker or local Postgres instance.
-_db_url = settings.DATABASE_URL
+_raw_url = settings.DATABASE_URL
+
+
+def _normalise_db_url(url: str) -> str:
+    """Rewrite legacy URL schemes so SQLAlchemy always selects psycopg v3.
+
+    Render's managed-Postgres "Internal Database URL" is copied as
+    ``postgres://...`` or ``postgresql://...``.  SQLAlchemy maps those to
+    psycopg2 by default, causing ModuleNotFoundError when only psycopg v3 is
+    installed.  Swapping the scheme here fixes the error without touching the
+    Render dashboard.
+    """
+    for old in ("postgres://", "postgresql://"):
+        if url.startswith(old):
+            return "postgresql+psycopg://" + url[len(old):]
+    return url
+
+
+_db_url = _normalise_db_url(_raw_url)
 _needs_ssl = (
     "render.com" in _db_url
     or "sslmode=require" in _db_url

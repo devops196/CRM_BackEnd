@@ -15,9 +15,13 @@ uvicorn[standard]==0.35.0
 sqlalchemy==2.0.43
 alembic==1.16.4
 
-# PostgreSQL driver (psycopg v3 — NOT psycopg2)
-# Use [binary] so pip downloads a prebuilt wheel instead of compiling from C source
+# PostgreSQL drivers
+# Primary:  psycopg v3 — used when DATABASE_URL scheme is postgresql+psycopg://
+# Fallback: psycopg2-binary — used when DATABASE_URL scheme is postgres:// or postgresql://
+#           (Render's managed-DB "Internal URL" copies default to this scheme)
+# Use [binary] / -binary so pip downloads prebuilt wheels; no C compiler needed.
 psycopg[binary]==3.2.9
+psycopg2-binary==2.9.10
 
 # Data validation & settings from env vars
 pydantic==2.11.7

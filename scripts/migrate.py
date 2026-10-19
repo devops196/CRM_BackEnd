@@ -33,6 +33,14 @@ def get_engine():
         print("ERROR: DATABASE_URL environment variable is not set.", file=sys.stderr)
         sys.exit(1)
 
+    # Render's managed-Postgres Internal URL arrives as postgres:// or
+    # postgresql://, which SQLAlchemy maps to psycopg2.  Rewrite to the
+    # explicit psycopg v3 scheme so the correct driver is always used.
+    for old in ("postgres://", "postgresql://"):
+        if url.startswith(old):
+            url = "postgresql+psycopg://" + url[len(old):]
+            break
+
     # SSL required for Render external connections; not needed internally
     needs_ssl = "render.com" in url or "sslmode=require" in url
     connect_args = {"sslmode": "require"} if needs_ssl else {}
