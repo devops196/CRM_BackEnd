@@ -60,18 +60,21 @@ def create_access_token(employee: models.Employee) -> str:
 
 
 def verify_google_credential(credential: str) -> dict:
-    client_id = os.getenv("GOOGLE_CLIENT_ID", GOOGLE_CLIENT_ID)
-    if not client_id:
+    raw_client_ids = os.getenv("GOOGLE_CLIENT_ID", GOOGLE_CLIENT_ID)
+    if not raw_client_ids:
         raise HTTPException(
             status_code=500,
             detail="GOOGLE_CLIENT_ID is missing in Render Environment settings."
         )
 
+    client_ids = [c.strip() for c in raw_client_ids.split(",") if c.strip()]
+    audience = client_ids[0] if len(client_ids) == 1 else client_ids
+
     try:
         info = id_token.verify_oauth2_token(
             credential,
             requests.Request(),
-            client_id
+            audience
         )
 
         print("Google token audience:", info.get("aud"))
