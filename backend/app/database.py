@@ -11,7 +11,14 @@ for parent in (Path(__file__).resolve().parents[1], Path(__file__).resolve().par
         load_dotenv(dotenv_path=env_candidate, override=True)
         break
 
-DATABASE_URL = os.getenv("DATABASE_URL")
+DATABASE_URL = (
+    os.getenv("DATABASE_URL")
+    or os.getenv("POSTGRES_URL")
+    or os.getenv("DB_URL")
+    or os.getenv("RENDER_POSTGRES_INTERNAL_URL")
+    or os.getenv("RENDER_POSTGRES_EXTERNAL_URL")
+)
+
 if not DATABASE_URL:
     if os.getenv("RENDER"):
         raise RuntimeError(
@@ -19,6 +26,8 @@ if not DATABASE_URL:
             "and add DATABASE_URL with your Render PostgreSQL connection string."
         )
     DATABASE_URL = "postgresql+psycopg://postgres:postgres@localhost:5432/internal_crm"
+
+DATABASE_URL = DATABASE_URL.strip().strip("'\"")
 
 if DATABASE_URL.startswith("postgres://"):
     DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql+psycopg://", 1)
