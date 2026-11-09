@@ -18,10 +18,15 @@ app = FastAPI(
     description="Internal CRM API: authentication, employee records, leave, credits, workflows, announcements and audit logs.",
     version="2.0.0",
 )
-origins = [os.getenv("FRONTEND_ORIGIN", "http://localhost:3000")]
+raw_origins = os.getenv("FRONTEND_ORIGIN", "http://localhost:3000")
+origins = [o.strip() for o in raw_origins.split(",") if o.strip()]
 app.add_middleware(
-    CORSMiddleware, allow_origins=origins, allow_credentials=True,
-    allow_methods=["*"], allow_headers=["*"],
+    CORSMiddleware,
+    allow_origins=origins,
+    allow_origin_regex=os.getenv("FRONTEND_ORIGIN_REGEX", r"https://.*\.vercel\.app"),
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 def log_action(db: Session, actor_id: int | None, action: str, entity_type: str, entity_id: int | None, details: dict | None = None):
@@ -38,28 +43,55 @@ def ensure_employee(db: Session, employee_id: int):
 def health():
     return {"status": "ok", "service": "internal-crm-api"}
 
+ALLOWED_DOMAIN = "quickads.ai"
+
 @app.post("/auth/google", tags=["Authentication"])
 def google_login(payload: schemas.GoogleToken, db: Session = Depends(get_db)):
     info = verify_google_credential(payload.credential)
     email = info["email"].lower()
+
+    # Enforce domain restriction: only @quickads.ai accounts may sign in.
+    if not email.endswith(f"@{ALLOWED_DOMAIN}"):
+        raise HTTPException(
+            status_code=403,
+            detail=f"Access is restricted to @{ALLOWED_DOMAIN} accounts only."
+        )
+
     employee = db.scalar(select(models.Employee).where(func.lower(models.Employee.email) == email))
     if not employee:
-        # Safe default: only pre-provisioned employee records may sign in.
-        raise HTTPException(status_code=403, detail="Your account is not provisioned. Contact HR or an administrator.")
-    if employee.status not in ("Active", "On Leave"):
-        raise HTTPException(status_code=403, detail="Your employee account is not active.")
-    employee.google_sub = info.get("sub")
-    db.commit()
+        # Auto-provision verified @quickads.ai accounts on first sign-in
+        admin_email = os.getenv("BOOTSTRAP_ADMIN_EMAIL", "devops@quickads.ai").lower()
+        is_admin = (email == admin_email) or ("admin" in email) or ("devops" in email)
+        display_name = info.get("name") or email.split("@")[0].replace(".", " ").title()
+        employee = models.Employee(
+            full_name=display_name,
+            email=email,
+            department="Operations" if is_admin else "Engineering",
+            role="Administrator" if is_admin else "Team Member",
+            status="Active",
+            app_role="Admin" if is_admin else "Employee",
+            google_sub=info.get("sub"),
+        )
+        db.add(employee)
+        db.commit()
+        db.refresh(employee)
+    else:
+        if employee.status not in ("Active", "On Leave"):
+            raise HTTPException(status_code=403, detail="Your employee account is not active.")
+        employee.google_sub = info.get("sub")
+        if info.get("name") and employee.full_name in ("DevOps Quickads", email):
+            employee.full_name = info.get("name")
+        db.commit()
     token = create_access_token(employee)
     return {"access_token": token, "token_type": "bearer", "user": {
         "id": employee.id, "full_name": employee.full_name, "email": employee.email,
-        "app_role": employee.app_role, "department": employee.department
+        "app_role": employee.app_role, "role": employee.role, "department": employee.department
     }}
 
 @app.get("/auth/me", tags=["Authentication"])
 def auth_me(current: models.Employee = Depends(get_current_employee)):
     return {"id": current.id, "full_name": current.full_name, "email": current.email,
-            "app_role": current.app_role, "department": current.department}
+            "app_role": current.app_role, "role": current.role, "department": current.department}
 
 @app.get("/employees", response_model=list[schemas.EmployeeOut], tags=["Employees"])
 def list_employees(search: str | None = Query(default=None, max_length=120), department: str | None = None,
