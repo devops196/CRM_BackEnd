@@ -35,11 +35,11 @@ bearer = HTTPBearer(auto_error=False)
 
 
 def create_access_token(employee: models.Employee) -> str:
-
-    if not JWT_SECRET or len(JWT_SECRET) < 32:
+    secret = os.getenv("JWT_SECRET", JWT_SECRET)
+    if not secret or len(secret) < 32:
         raise HTTPException(
             status_code=500,
-            detail="JWT_SECRET must be set to a random secret of at least 32 characters."
+            detail="JWT_SECRET must be set to a random secret of at least 32 characters in Render Environment settings."
         )
 
     now = datetime.now(timezone.utc)
@@ -54,24 +54,24 @@ def create_access_token(employee: models.Employee) -> str:
 
     return jwt.encode(
         payload,
-        JWT_SECRET,
+        secret,
         algorithm=JWT_ALGORITHM
     )
 
 
 def verify_google_credential(credential: str) -> dict:
-
-    if not GOOGLE_CLIENT_ID:
+    client_id = os.getenv("GOOGLE_CLIENT_ID", GOOGLE_CLIENT_ID)
+    if not client_id:
         raise HTTPException(
             status_code=500,
-            detail="GOOGLE_CLIENT_ID is missing."
+            detail="GOOGLE_CLIENT_ID is missing in Render Environment settings."
         )
 
     try:
         info = id_token.verify_oauth2_token(
             credential,
             requests.Request(),
-            GOOGLE_CLIENT_ID
+            client_id
         )
 
         print("Google token audience:", info.get("aud"))
@@ -105,7 +105,8 @@ def get_current_employee(
             detail="Authentication required."
         )
 
-    if not JWT_SECRET or len(JWT_SECRET) < 32:
+    secret = os.getenv("JWT_SECRET", JWT_SECRET)
+    if not secret or len(secret) < 32:
         raise HTTPException(
             status_code=500,
             detail="JWT_SECRET is not configured."
@@ -114,7 +115,7 @@ def get_current_employee(
     try:
         payload = jwt.decode(
             credentials.credentials,
-            JWT_SECRET,
+            secret,
             algorithms=[JWT_ALGORITHM]
         )
 
