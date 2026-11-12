@@ -284,15 +284,13 @@ def update_credits(credit_id: int, payload: schemas.CreditUpdate, db: Session = 
 
 @app.post("/credits/{credit_id}/deduct", response_model=schemas.CreditOut, tags=["Credits & Usage"])
 def deduct_credits(credit_id: int, payload: schemas.CreditDeduct, db: Session = Depends(get_db),
-                   actor: models.Employee = Depends(get_current_employee)):
+                   actor: models.Employee = Depends(require_roles("Admin", "HR"))):
     item = db.get(models.CreditAllocation, credit_id)
     if not item:
         raise HTTPException(status_code=404, detail="Credit allocation not found.")
-    if actor.app_role not in ("Admin", "HR") and item.employee_id != actor.id:
-        raise HTTPException(status_code=403, detail="Not authorized to deduct credits from this allocation.")
     remaining = item.allocated_credits - item.used_credits
     if payload.amount > remaining:
-        raise HTTPException(status_code=422, detail=f"Insufficient balance ({remaining:.2f} available, {payload.amount:.2f} requested).")
+        raise HTTPException(status_code=422, detail=f"Insufficient balance ({remaining:.0f} available, {payload.amount:.0f} requested).")
     item.used_credits += payload.amount
     log_action(db, actor.id, "credits.deducted", "credit_allocation", item.id,
                {"amount": str(payload.amount), "reason": payload.reason, "new_balance": str(item.allocated_credits - item.used_credits)})
