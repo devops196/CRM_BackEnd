@@ -14,8 +14,8 @@ from .security import (
 
 Base.metadata.create_all(bind=engine)
 app = FastAPI(
-    title="Internal CRM API",
-    description="Internal CRM API: authentication, employee records, leave, credits, workflows, announcements and audit logs.",
+    title="Internal CRM - Quickads.ai API",
+    description="Internal CRM - Quickads.ai API: authentication, employee records, leave, credits, workflows, announcements and audit logs.",
     version="2.0.0",
 )
 raw_origins = os.getenv("FRONTEND_ORIGIN", "http://localhost:3000")
