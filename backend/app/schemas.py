@@ -62,8 +62,18 @@ class LeaveOut(BaseModel):
 class CreditCreate(BaseModel):
     category: str = Field(min_length=2, max_length=100)
     employee_id: int
-    allocated_credits: Decimal = Field(ge=0)
+    allocated_credits: Decimal = Field(gt=0)
     used_credits: Decimal = Field(default=Decimal("0"), ge=0)
+
+class CreditUpdate(BaseModel):
+    category: str | None = Field(default=None, min_length=2, max_length=100)
+    employee_id: int | None = None
+    allocated_credits: Decimal | None = Field(default=None, gt=0)
+    used_credits: Decimal | None = Field(default=None, ge=0)
+
+class CreditDeduct(BaseModel):
+    amount: Decimal = Field(gt=0)
+    reason: str | None = None
 
 class CreditOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
@@ -73,6 +83,9 @@ class CreditOut(BaseModel):
     allocated_credits: Decimal
     used_credits: Decimal
     updated_at: datetime
+    employee_name: str | None = None
+    employee_email: str | None = None
+    employee_department: str | None = None
 
 class AnnouncementCreate(BaseModel):
     title: str = Field(min_length=2, max_length=180)

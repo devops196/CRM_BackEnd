@@ -1,7 +1,7 @@
 from datetime import date, datetime
 from decimal import Decimal
 from sqlalchemy import String, Date, DateTime, ForeignKey, Integer, Text, Boolean, Numeric, JSON
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 from .database import Base
 
 class Employee(Base):
@@ -36,10 +36,24 @@ class CreditAllocation(Base):
     __tablename__ = "credit_allocations"
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     category: Mapped[str] = mapped_column(String(100), nullable=False, index=True)
-    employee_id: Mapped[int] = mapped_column(ForeignKey("employees.id", ondelete="CASCADE"), nullable=False)
+    employee_id: Mapped[int] = mapped_column(ForeignKey("employees.id", ondelete="CASCADE"), nullable=False, index=True)
     allocated_credits: Mapped[Decimal] = mapped_column(Numeric(12,2), default=0, nullable=False)
     used_credits: Mapped[Decimal] = mapped_column(Numeric(12,2), default=0, nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+
+    employee: Mapped["Employee"] = relationship("Employee", foreign_keys=[employee_id], lazy="joined")
+
+    @property
+    def employee_name(self) -> str | None:
+        return self.employee.full_name if self.employee else None
+
+    @property
+    def employee_email(self) -> str | None:
+        return self.employee.email if self.employee else None
+
+    @property
+    def employee_department(self) -> str | None:
+        return self.employee.department if self.employee else None
 
 class Announcement(Base):
     __tablename__ = "announcements"

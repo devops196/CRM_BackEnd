@@ -3,7 +3,7 @@ from datetime import date
 from decimal import Decimal
 from fastapi import FastAPI, Depends, HTTPException, Query, Response
 from fastapi.middleware.cors import CORSMiddleware
-from sqlalchemy import func, select
+from sqlalchemy import func, select, or_, cast, String
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 from .database import Base, engine, get_db
@@ -203,16 +203,47 @@ def review_leave(leave_id: int, payload: schemas.LeaveReview, db: Session = Depe
     return item
 
 @app.get("/credits", response_model=list[schemas.CreditOut], tags=["Credits & Usage"])
-def list_credits(db: Session = Depends(get_db), current: models.Employee = Depends(get_current_employee)):
-    stmt = select(models.CreditAllocation).order_by(models.CreditAllocation.category)
+def list_credits(
+    search: str | None = None,
+    category: str | None = None,
+    employee_id: int | None = None,
+    db: Session = Depends(get_db),
+    current: models.Employee = Depends(get_current_employee)
+):
+    stmt = (
+        select(models.CreditAllocation)
+        .join(models.Employee, models.CreditAllocation.employee_id == models.Employee.id)
+        .order_by(models.CreditAllocation.category, models.Employee.full_name)
+    )
     if current.app_role not in ("Admin", "HR"):
         stmt = stmt.where(models.CreditAllocation.employee_id == current.id)
+    elif employee_id is not None:
+        stmt = stmt.where(models.CreditAllocation.employee_id == employee_id)
+
+    if category and category not in ("All categories", "all", "All"):
+        stmt = stmt.where(models.CreditAllocation.category == category)
+
+    if search and search.strip():
+        term = f"%{search.strip()}%"
+        stmt = stmt.where(
+            or_(
+                models.Employee.full_name.ilike(term),
+                models.Employee.email.ilike(term),
+                models.Employee.department.ilike(term),
+                cast(models.CreditAllocation.employee_id, String).ilike(term),
+                models.CreditAllocation.category.ilike(term),
+            )
+        )
     return list(db.scalars(stmt).all())
 
 @app.post("/credits", response_model=schemas.CreditOut, status_code=201, tags=["Credits & Usage"])
 def allocate_credits(payload: schemas.CreditCreate, db: Session = Depends(get_db),
                      actor: models.Employee = Depends(require_roles("Admin", "HR"))):
     ensure_employee(db, payload.employee_id)
+    if payload.allocated_credits <= 0:
+        raise HTTPException(status_code=422, detail="Allocated credits must be greater than zero.")
+    if payload.used_credits < 0:
+        raise HTTPException(status_code=422, detail="Used credits cannot be negative.")
     if payload.used_credits > payload.allocated_credits:
         raise HTTPException(status_code=422, detail="Used credits cannot exceed allocated credits.")
     item = models.CreditAllocation(**payload.model_dump())
@@ -225,19 +256,61 @@ def allocate_credits(payload: schemas.CreditCreate, db: Session = Depends(get_db
     return item
 
 @app.patch("/credits/{credit_id}", response_model=schemas.CreditOut, tags=["Credits & Usage"])
-def update_credits(credit_id: int, payload: schemas.CreditCreate, db: Session = Depends(get_db),
+def update_credits(credit_id: int, payload: schemas.CreditUpdate, db: Session = Depends(get_db),
                    actor: models.Employee = Depends(require_roles("Admin", "HR"))):
     item = db.get(models.CreditAllocation, credit_id)
     if not item:
         raise HTTPException(status_code=404, detail="Credit allocation not found.")
-    if payload.used_credits > payload.allocated_credits:
+    update_data = payload.model_dump(exclude_unset=True)
+    if not update_data:
+        return item
+    if "employee_id" in update_data and update_data["employee_id"] is not None:
+        ensure_employee(db, update_data["employee_id"])
+    new_allocated = update_data.get("allocated_credits", item.allocated_credits)
+    new_used = update_data.get("used_credits", item.used_credits)
+    if new_allocated is not None and new_allocated <= 0:
+        raise HTTPException(status_code=422, detail="Allocated credits must be greater than zero.")
+    if new_used is not None and new_used < 0:
+        raise HTTPException(status_code=422, detail="Used credits cannot be negative.")
+    if new_allocated is not None and new_used is not None and new_used > new_allocated:
         raise HTTPException(status_code=422, detail="Used credits cannot exceed allocated credits.")
-    for key, value in payload.model_dump().items():
+    for key, value in update_data.items():
         setattr(item, key, value)
-    log_action(db, actor.id, "credits.updated", "credit_allocation", item.id)
+    log_action(db, actor.id, "credits.updated", "credit_allocation", item.id,
+               {"category": item.category, "allocated": str(item.allocated_credits), "used": str(item.used_credits)})
     db.commit()
     db.refresh(item)
     return item
+
+@app.post("/credits/{credit_id}/deduct", response_model=schemas.CreditOut, tags=["Credits & Usage"])
+def deduct_credits(credit_id: int, payload: schemas.CreditDeduct, db: Session = Depends(get_db),
+                   actor: models.Employee = Depends(get_current_employee)):
+    item = db.get(models.CreditAllocation, credit_id)
+    if not item:
+        raise HTTPException(status_code=404, detail="Credit allocation not found.")
+    if actor.app_role not in ("Admin", "HR") and item.employee_id != actor.id:
+        raise HTTPException(status_code=403, detail="Not authorized to deduct credits from this allocation.")
+    remaining = item.allocated_credits - item.used_credits
+    if payload.amount > remaining:
+        raise HTTPException(status_code=422, detail=f"Insufficient balance ({remaining:.2f} available, {payload.amount:.2f} requested).")
+    item.used_credits += payload.amount
+    log_action(db, actor.id, "credits.deducted", "credit_allocation", item.id,
+               {"amount": str(payload.amount), "reason": payload.reason, "new_balance": str(item.allocated_credits - item.used_credits)})
+    db.commit()
+    db.refresh(item)
+    return item
+
+@app.delete("/credits/{credit_id}", status_code=204, tags=["Credits & Usage"])
+def delete_credits(credit_id: int, db: Session = Depends(get_db),
+                   actor: models.Employee = Depends(require_roles("Admin", "HR"))):
+    item = db.get(models.CreditAllocation, credit_id)
+    if not item:
+        raise HTTPException(status_code=404, detail="Credit allocation not found.")
+    log_action(db, actor.id, "credits.deleted", "credit_allocation", item.id,
+               {"employee_id": item.employee_id, "category": item.category})
+    db.delete(item)
+    db.commit()
+    return None
 
 @app.get("/announcements", response_model=list[schemas.AnnouncementOut], tags=["Announcements"])
 def list_announcements(db: Session = Depends(get_db), current: models.Employee = Depends(get_current_employee)):
